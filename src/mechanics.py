@@ -16,13 +16,6 @@ getcontext().prec = 3
 nDoF = 6
 
 
-# reference trajectory
-def ref_trajectory(self):
-    x = np.linspace(0, 2 * np.pi, 100)
-    y = 3 * np.sin(x)
-    q_des = Matrix([x, y])
-
-
 class kinematics():
 
     def __init__(self):
@@ -31,23 +24,26 @@ class kinematics():
         self.q = [self.q1, self.q2]
         self.qd = [self.q1d, self.q2d]
         self.l1, self.l2 = symbols('l_1 l_2', positive=True)
-        self.l = [self.l1, self.l2]
+        # self.l = [self.l1, self.l2]
+        self.l = [2.0, 2.0] ############################
 
         # COM vectors
         self.r1, self.r2 = symbols('r1 r2')
         self.r11 = zeros(3, 1)
-        self.r11[0] = self.r1
+        # self.r11[0] = self.r1
+        self.r11[0] = 1 ################################
         self.r22 = zeros(3, 1)
-        self.r22[0] = self.r2
+        # self.r22[0] = self.r2
+        self.r22[0] = 1  #################################
         self.r = zeros(3, 2)
         self.r[:, 0] = self.r11
         self.r[:, 1] = self.r22
 
-        self.a = Array([0, self.l1, self.l2])
+        self.a = Array([0, self.l[0], self.l[1]])
         self.d = Array([0.0, 0.0, 0.0])
         self.alpha = Array([0.0, 0.0, 0.0])
         self.T_eff = eye(4)
-        self.T_eff[0, 3] = self.l2
+        self.T_eff[0, 3] = self.l[-1]
 
         self.q_i = Symbol("q_i")
         self.alpha_i = Symbol("alpha_i")
@@ -139,14 +135,17 @@ class dynamics():
     def __init__(self):
         self.tau_1, self.tau_2, self.I1_zz, self.I2_zz, self.m1, self.m2 = symbols('tau_1 tau_2 I1_zz, I2_zz, m1, m2')
         self.g = symbols('g', positive=True)
-        self.m = [self.m1, self.m2]
+        # self.m = [self.m1, self.m2]
+        self.m = [3, 1] #############################
         self.grav = transpose(Matrix([[0, self.g, 0]]))
 
         # Inertia tensor wrt centre of mass of each link
         self.I1 = zeros(3, 3)
-        self.I1[2, 2] = self.I1_zz
+        # self.I1[2, 2] = self.I1_zz
+        self.I1[2, 2] = 2   ###########################
         self.I2 = zeros(3, 3)
-        self.I2[2, 2] = self.I2_zz
+        # self.I2[2, 2] = self.I2_zz
+        self.I2[2, 2] = 1.5   ##########################
         self.I = [self.I1, self.I2]
 
         self.kin = kinematics()
