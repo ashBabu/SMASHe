@@ -3,7 +3,7 @@ from sympy import *
 from sympy.physics.mechanics import *
 from sympy.tensor.array import Array
 from decimal import getcontext
-import cvxpy as cp
+# import cvxpy as cp
 import matplotlib.pyplot as plt
 from mpl_toolkits import mplot3d
 import scipy.optimize as opt
@@ -182,9 +182,9 @@ class dynamics():
     def dyn_para_numeric(self, lp, qp, qdp):
         M, C, G = self.get_dyn_para(self.kin.q, self.kin.qd)
         for i in range(len(qp)):
-            M = M.subs(self.kin.q[i], qp[i]).subs(self.kin.l[i], lp[i])
-            C = C.subs(self.kin.q[i], qp[i]).subs(self.kin.l[i], lp[i]).subs(self.kin.qd[i], qdp[i])
-            G = G.subs(self.kin.q[i], qp[i]).subs(self.kin.l[i], lp[i])
+            M = M.subs([(self.kin.q[i], qp[i]), (self.kin.l[i], lp[i])])
+            C = C.subs([(self.kin.q[i], qp[i]), (self.kin.l[i], lp[i]), (self.kin.qd[i], qdp[i])])
+            G = G.subs([(self.kin.q[i], qp[i]), (self.kin.l[i], lp[i])])
         return M, C, G
 
     def round2zero(self, m, e):
@@ -201,7 +201,7 @@ if __name__ == '__main__':
     lp, qp, qdp = [1, 1], [0, np.pi/2], [0.1, 0.2]
     M, C, G = dyn.get_dyn_para(kin.q, kin.qd)  # Symbolic dynamic parameters
     # M, C, G = kin.dyn_para_numeric(lp, qp, qdp)  # Numeric values dynamic parameters
-    print 'hi'
+    print ('hi')
 
 
 
