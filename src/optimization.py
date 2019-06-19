@@ -66,9 +66,9 @@ if __name__ == '__main__':
         print('end-eff pos = : ', mpc.end_effec_pose(q))
         x0 = mpc.A * x0 + mpc.B * sp.Matrix(U[-1])
         u0 = U[-1]
-y = 3 * np.sin(2*np.pi*mpc.omega*mpc.t)
-plt.plot(mpc.t, y, '*b')
-# plt.hold(True)
-plt.plot(pos[0, :], pos[1, :],  '-r')
+    y = 3 * np.sin(2*np.pi*mpc.omega*mpc.t)
+    plt.plot(mpc.t, y, '*b')
+    # plt.hold(True)
+    plt.plot(pos[0, :], pos[1, :],  '-r')
 
 print ('hi')
