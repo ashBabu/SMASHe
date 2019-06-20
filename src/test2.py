@@ -74,23 +74,21 @@ class mpc_opt():
     @staticmethod
     def ref_trajectory(i):  # y = 3*sin(2*pi*omega*t)
         # y = 3 * np.sin(2*np.pi*self.omega*self.t[i])
-        x_ref = np.array([[0], [1], [0]])
+        x_ref = np.array([[0], [2], [0]])
         return x_ref
         # return sp.Matrix(([[self.t[i]], [y], [0]]))
 
-    def cost_function(self, U, *args):
-        t = args
-        nx, nu = self.B.shape
-        x0 = U[0:nx]
-        u = U[nx:nx+nu]
+    def cost_function(self, u, *args):
+        x0, t = args
+        # nx, nu = self.B.shape
         u = u.reshape(len(u), -1)
         x0 = x0.reshape(len(x0), -1)
-        x1 = self.A * x0 + self.B * u
+        x1 = self.A @ x0 + self.B @ u
         # q = [x1[0], x1[1]]
         # pos = self.end_effec_pose(q)
         traj_ref = self.ref_trajectory(t)
         pos_error = x1 - traj_ref
-        cost = pos_error.transpose() * self.Q * pos_error + u.transpose() * self.R * u
+        cost = pos_error.transpose() @ self.Q @ pos_error + u.transpose() @ self.R @ u
         return cost
 
     def cost_gradient(self, U, *args):
@@ -129,14 +127,17 @@ class mpc_opt():
         #     dict(type='eq', fun=simplex_constraint),
         #     dict(type='eq', fun=dot_constraint))
 
-    def optimise(self, u0, t):
+    def optimise(self, u0, x0, t):
         umin = [-2., -3.]
         umax = [2., 3.]
         xmin = [-10., -9., -8.]
         xmax = [10., 9., 8.]
         bounds = ((xmin[0], xmax[0]), (xmin[1], xmax[1]), (xmin[2], xmax[2]), (umin[0], umax[0]), (umin[1], umax[1]))
+        bounds1 = ((umin[0], umax[0]), (umin[1], umax[1]))
 
-        U = opt.minimize(self.cost_function2, u0, args=(t), method='SLSQP', bounds=bounds,
+        # U = opt.minimize(self.cost_function, u0, args=(t), method='SLSQP', bounds=bounds,
+        #                  options={'maxiter': 200, 'disp': True})
+        U = opt.minimize(self.cost_function, u0, args=(x0, t), method='SLSQP', bounds=bounds1,
                          options={'maxiter': 200, 'disp': True})
         U = U.x
         return U
@@ -144,28 +145,30 @@ class mpc_opt():
 
 if __name__ == '__main__':
     mpc = mpc_opt()
-    mpc.transfer_matrices(5)
+    mpc.transfer_matrices(30)
     # P, H = mpc.imgpc_predmat(mpc.A, mpc.B, np.eye(3), 0, 5)
     pos = sp.zeros(3, len(mpc.t))
-    x0, u0, = sp.Matrix([[0.1], [0.02], [0.05]]), sp.Matrix([[0.4], [0.2]])
-    X, U = sp.zeros(len(x0), len(mpc.t)), sp.zeros(len(u0), len(mpc.t))
-    # x0, u0, U, X = sp.Matrix([[0.1], [0.01], [0.01], [0.01]]), sp.Matrix([[0.1], [0.2]]), [], []
-    U0 = sp.Matrix([x0, u0])
+    x0, u0, = np.array([[0.0], [0.0], [0.0]]), np.array([[0.4], [0.2]])
+    X, U = np.zeros((len(x0), len(mpc.t))), np.zeros((len(u0), len(mpc.t)))
     nx, nu = mpc.A.shape[-1], mpc.B.shape[-1]
     for i in range(len(mpc.t)):
         print('i = :', i)
-        result = mpc.optimise(U0, i)
-        x0 = result[0:nx]
-        u = result[nx:nx + nu]
+        U[:, i], X[:, i] = u0.transpose(), x0.transpose()
+        u = mpc.optimise(u0, x0, i)
         u = u.reshape(len(u), -1)
         x0 = x0.reshape(len(x0), -1)
-        U[:, i], X[:, i] = u0, x0
-        # x0 = mpc.A * x0 + mpc.B * u
-        U0 = result
-
+        x0 = mpc.A @ x0 + mpc.B @ u
+        u0 = u
+    plt.figure(1)
     plt.plot(X[0, :], '--r')
-    # plt.plot(X[1, :], '--b')
-    # plt.plot(X[2, :], '*r')
+    plt.plot(X[1, :], '--b')
+    plt.plot(X[2, :], '--g')
+    plt.ylim(-2, 2)
+
+    plt.figure(2)
+    plt.plot(U[0, :], '--r')
+    plt.plot(U[1, :], '--b')
+    plt.ylim(-1, 1)
     plt.show()
 
     # y = 3 * np.sin(2*np.pi*mpc.omega*mpc.t)
