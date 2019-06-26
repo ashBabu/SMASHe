@@ -14,6 +14,7 @@ import matplotlib.pyplot as plt
 
 # TODO:
 # 1. Code for adding control horizon
+# 2.  Add jacobian in optimization to speed up
 
 
 class mpc_opt():
@@ -21,7 +22,7 @@ class mpc_opt():
     def __init__(self, A=None, B=None, C=None, Q=None, R=None, P=None,
                  xl=None, xh=None, ul=None, uh=None, N=4, x0=None, time=None):
 
-        if not A.any():
+        if not isinstance(A, (list, tuple, np.ndarray)):
             self.Q = 5*np.diag((0.5, 1, 0))
             self.P = 2*np.diag((5, 5, 5))   # terminal state penalty
             self.R = np.eye(2)
@@ -127,33 +128,20 @@ class mpc_opt():
         return y_ref
         # return sp.Matrix(([[self.t[i]], [y], [0]]))
 
-    def cost_function_old(self, u, *args):
-        x0, t = args
-        u = u.reshape(len(u), -1)
-        x0 = x0.reshape(len(x0), -1)
-        x = self.A @ x0 + self.B @ u
-        y = self.C @ x
-        # q = [x1[0], x1[1]]
-        # pos = self.end_effec_pose(q)
-        y_ref = self.ref_trajectory(t)
-        error = y - y_ref
-        cost = error.transpose() @ self.Q @ error + u.transpose() @ self.R @ u
-        return cost
-
     def cost_gradient(self, u, *args):
-        N = self.N
         x0, t = args
+        N = self.N
         u = u.reshape(len(u), -1)
-        Sx, Su = self.transfer_matrices(N)
-        Qs, Rs, Cs = self.penalties(N)
+        Sx, Su = self.transfer_matrices()
+        Qs, Rs, Cs = self.penalties()
         Q_blk = self.block_diag(Qs, self.P)
-        x_N = self.plant(Sx, Su, x0, u)
-        y = Cs @ x_N
+        G = 2 * (Rs + Su.transpose() @ Q_blk @ Su)
+        F = 2 * (Su.transpose() @ Q_blk @ Sx)
+        K = 2 * Su.transpose() @ Q_blk
         y_ref = self.ref_trajectory(t)
         y_ref_lifted = np.tile(y_ref, (N, 1))
-        error = y_ref_lifted - y
-        cost_gradient = np.vstack((Q_blk @ error, Rs @ u, self.Q @ x0))
-        return cost_gradient
+        cost_gradient = np.vstack((0.5 * G @ u, F @ x0, -K @ y_ref_lifted, np.zeros((18, 1))))
+        return np.squeeze(cost_gradient)
 
     def constraints(self, u, *args):
         x0, t = args
@@ -196,11 +184,11 @@ class mpc_opt():
         #           'fun': self.con_eq,
         #           'args': (x0, t)}
 
-        U = opt.minimize(self.cost_function, u0, args=(x0, t), method='SLSQP',
-                         options={'maxiter': 200, 'disp': True}, constraints=[con_ineq])
+        # U = opt.minimize(self.cost_function, u0, args=(x0, t), method='SLSQP',
+        #                  options={'maxiter': 200, 'disp': True}, jac=self.cost_gradient, constraints=con_ineq)
 
-        # U = opt.minimize(self.cost_function2, u0, args=(x0, t), method='SLSQP',
-        #                  options={'maxiter': 200, 'disp': True})
+        U = opt.minimize(self.cost_function, u0, args=(x0, t), method='SLSQP',
+                         options={'maxiter': 200, 'disp': True}, constraints=con_ineq)
         U = U.x
         return U
 
@@ -223,6 +211,9 @@ if __name__ == '__main__':
     mpc = mpc_opt()
     pos = sp.zeros(3, len(mpc.t))
     x0, u0, = np.array([[0.0], [0.0], [0.0]]), np.array([[0.4], [0.2]])
+
+    cg = mpc.cost_gradient(np.tile(u0, (mpc.N, 1)), x0, 1)
+    cons = mpc.constraints(np.tile(u0, (mpc.N, 1)), x0, 1)
 
     X, U = mpc.get_state_and_input(u0, x0)
 
