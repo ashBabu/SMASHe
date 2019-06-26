@@ -1,6 +1,7 @@
 import numpy as np
 import sympy as sp
 import scipy.optimize as opt
+from scipy.linalg import block_diag
 from mechanics import dynamics, kinematics
 import matplotlib.pyplot as plt
 
@@ -42,6 +43,9 @@ class mpc_opt():
 
         self.t = np.linspace(0, 1, 50)
 
+        self.ul, self.uh, self.xl, self.xh = np.array([[-2.], [-3.]]), np.array([[2.], [3.]]), np.array([[-10.], [-9.], [-8.]]), np.array([[10.], [9.], [8.]])
+        self.x0 = np.array([[0.0], [0.0], [0.0]])
+        self.N = 3   # # Prediction horizon
         self.dyn = dynamics()
         self.kin = kinematics()
 
@@ -49,48 +53,65 @@ class mpc_opt():
         x_dot = self.A * x + self.B * u
         return x_dot
 
-    def transfer_matrices(self, N):
+    def transfer_matrices(self,):
+        N = self.N
         nx, nB = self.B.shape
         Su = np.zeros((N*nx, N*nB))
-        Sx = self.A
+        Sx = self.C @ self.A
         An = self.A @ self.A
         for i in range(N-1):
-            Sx = np.concatenate((Sx, An), axis=0)
+            Sx = np.concatenate((Sx, self.C @ An), axis=0)
             An = An @ self.A
         B = self.B
         for i in range(N):
-            Su = Su + np.kron(np.eye(N, k=-i), B)
+            Su = Su + np.kron(np.eye(N, k=-i), self.C @ B)
             B = self.A @ B
         return Sx, Su
 
-    def penalties(self, N):
-        return np.kron(np.eye(N-1), self.Q), np.kron(np.eye(N), self.R), np.kron(np.eye(N), self.C)
+    def penalties(self, ):
+        N = self.N
+        if N == 1:
+            Qs = self.Q
+        else:
+            Qs = np.kron(np.eye(N - 1), self.Q)
+        return Qs, np.kron(np.eye(N), self.R), np.kron(np.eye(N), self.C)
 
     def plant(self, Sx, Su, x0, u):
         x = Sx @ x0 + Su @ u
         return x
 
     def block_diag(self, Q, P):
+        N = self.N
         nx, nu = self.B.shape
         t1 = np.zeros((N * nx, N * nx))
-        t1[0:(N - 1) * nx, 0:(N - 1) * nx] = Q
+        if N != 1:
+            t1[0:(N - 1) * nx, 0:(N - 1) * nx] = Q
+        else:
+            t1 = Q
         t2 = np.zeros((N, N))
         t2[-1, -1] = 1
         t3 = np.kron(t2, P)
         return t1 + t3  # diag([Q, Q, ....., P])
 
     def cost_function(self, u, *args):
-        x0, t, N = args
+        x0, t, = args
+        N = self.N
         u = u.reshape(len(u), -1)
-        Sx, Su = self.transfer_matrices(N)
-        Qs, Rs, Cs = self.penalties(N)
+        Sx, Su = self.transfer_matrices()
+        Qs, Rs, Cs = self.penalties()
         Q_blk = self.block_diag(Qs, self.P)
-        x_N = self.plant(Sx, Su, x0, u)
-        y = Cs @ x_N
+        # x_N = self.plant(Sx, Su, x0, u)
+
+        G = 2 * (Rs + Su.transpose() @ Q_blk @ Su)
+        F = 2 * (Su.transpose() @ Q_blk @ Sx)
+        K = 2 * Su.transpose() @ Q_blk
+
+        # y = Cs @ x_N
         y_ref = self.ref_trajectory(t)
         y_ref_lifted = np.tile(y_ref, (N, 1))
-        error = y_ref_lifted - y
-        cost = error.transpose() @ Q_blk @ error + u.transpose() @ Rs @ u + x0.transpose() @ self.Q @ x0
+        # error = y_ref_lifted - y
+        # cost = error.transpose() @ Q_blk @ error + u.transpose() @ Rs @ u + x0.transpose() @ self.Q @ x0
+        cost = 0.5 * u.transpose() @ G @ u + u.transpose() @ F @ x0 - u.transpose() @ K @ y_ref_lifted
         return cost
 
     def end_effec_pose(self, q):
@@ -118,7 +139,8 @@ class mpc_opt():
         return cost
 
     def cost_gradient(self, u, *args):
-        x0, t, N = args
+        N = self.N
+        x0, t = args
         u = u.reshape(len(u), -1)
         Sx, Su = self.transfer_matrices(N)
         Qs, Rs, Cs = self.penalties(N)
@@ -132,45 +154,58 @@ class mpc_opt():
         return cost_gradient
 
     def constraints(self, u, *args):
-        def x_bounds(x):
-            return x.sum() - 1
+        x0, t = args
+        N = self.N
+        nx, nu = self.B.shape
+        Ix, Iu = np.eye(nx), np.eye(nu)
+        zx, zu = np.zeros((2 * nu, nx)), np.zeros((2 * nx, nu))
+        Mi = np.vstack((zx, -Ix, Ix))
+        Ei = np.vstack((-Iu, Iu, zu))
+        bi = np.vstack((-self.ul, self.uh, -self.xl, self.xh))
+        MN = np.vstack((-Ix, Ix))
+        bN = np.vstack((-self.xl, self.xh))
+        c = np.vstack((np.tile(bi, (N, 1)), bN))
+        tp = c.shape[0]
+        D = np.vstack((Mi, np.zeros((tp - Mi.shape[0], Mi.shape[1]))))
+        if N == 1:
+            b = Mi
+        else:
+            a = np.kron(np.eye(N - 1), Mi)
+            b = block_diag(a, MN)
+        tt = c.shape[0] - b.shape[0]
+        q = np.zeros((tt, nx * N))
+        M = np.vstack((q, b))
+        aa = np.kron(np.eye(N), Ei)
+        tt1 = c.shape[0] - aa.shape[0]
+        qq = np.zeros((tt1, nu * N))
+        Eps = np.vstack((aa, qq))
+        Sx, Su = self.transfer_matrices()
+        L = M @ Su + Eps
+        W = -D - M @ Sx
+        u = u.reshape(len(u), -1)
+        con_ieq = c + W @ x0 - L @ u
+        return np.squeeze(con_ieq)
 
-        # def dot_constraint(x):
-        #     return x.dot(R) - E
+    def optimise(self, u0, x0, t):
+        con_ineq = {'type': 'ineq',
+                    'fun': self.constraints,
+                    'args': (x0, t)}
+        # con_eq = {'type': 'eq',
+        #           'fun': self.con_eq,
+        #           'args': (x0, t)}
 
-        # def objective(x):
-        #     return x.dot(M).dot(x)
+        U = opt.minimize(self.cost_function, u0, args=(x0, t), method='SLSQP',
+                         options={'maxiter': 200, 'disp': True}, constraints=[con_ineq])
 
-        umin = np.array([-2., -3.])
-        umax = np.array([2., 3.])
-        xmin = np.array([-10., -9., -8.])
-        xmax = np.array([10., 9., 8.])
-        lb = sp.Matrix([xmin, umin])
-        ub = sp.Matrix([xmax, umax])
-
-        bounds = [(lb, ub)]
-        # constraints = (
-        #     dict(type='eq', fun=simplex_constraint),
-        #     dict(type='eq', fun=dot_constraint))
-
-    def optimise(self, u0, x0, t, N=10, k=1):
-        umin = [-2., -3.]
-        umax = [2., 3.]
-        xmin = [-10., -9., -8.]
-        xmax = [10., 9., 8.]
-        # bounds = ((xmin[0], xmax[0]), (xmin[1], xmax[1]), (xmin[2], xmax[2]), (umin[0], umax[0]), (umin[1], umax[1]))
-        bounds1 = ((umin[0], umax[0]), (umin[1], umax[1]))
-
-        # U = opt.minimize(self.cost_function, u0, args=(x0, t, N), method='SLSQP', bounds=bounds1, jac=self.cost_gradient(u0, x0, t, N),
+        # U = opt.minimize(self.cost_function2, u0, args=(x0, t), method='SLSQP',
         #                  options={'maxiter': 200, 'disp': True})
-
-        U = opt.minimize(self.cost_function, u0, args=(x0, t, N), method='SLSQP', options={'maxiter': 200, 'disp': True})
         U = U.x
         return U
 
 
 if __name__ == '__main__':
     mpc = mpc_opt()
+    # mpc.constraints()
     # P, H = mpc.imgpc_predmat(mpc.A, mpc.B, np.eye(3), 0, 5)
     pos = sp.zeros(3, len(mpc.t))
     x0, u0, = np.array([[0.0], [0.0], [0.0]]), np.array([[0.4], [0.2]])
@@ -178,13 +213,13 @@ if __name__ == '__main__':
     nx, nu = mpc.B.shape
 
     # ######## loop for cost_function ###########
-    N = 2   # Prediction horizon
-    u0 = np.tile(u0, (N, 1))
+
+    u0 = np.tile(u0, (mpc.N, 1))
 
     for i in range(len(mpc.t)):
         print('i = :', i)
         U[:, i], X[:, i] = u0[0:nu].transpose(), x0.transpose()
-        u = mpc.optimise(u0, x0, i, N=N, k=2)
+        u = mpc.optimise(u0, x0, i,)
         u0 = u
         u = u[0:nu].reshape(nu, -1)
         x0 = x0.reshape(len(x0), -1)
