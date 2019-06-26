@@ -5,7 +5,7 @@ from scipy.linalg import block_diag
 from mechanics import dynamics, kinematics
 import matplotlib.pyplot as plt
 
-# Model Predictive Control : Currently, the prediction horizon and control horizon are set the same with N
+# Model Predictive Control : Currently, the prediction and control horizon are set the same with N
 #   (x_N-x_r)^T P (x_N-x_r) + \sum_{k=0}^{N-1} (x_k-x_r)^T Q (x_k-x_r) + u_k^T R u_k \\
 #   subject to & x_{k+1} = A x_k + B u_k \\
 #   x_{min} <= x_k  <= x_{max} \\
@@ -14,38 +14,46 @@ import matplotlib.pyplot as plt
 
 # TODO:
 # 1. Code for adding control horizon
-# 2. Code for adding u and x bounds
 
 
 class mpc_opt():
 
-    def __init__(self):
+    def __init__(self, A=None, B=None, C=None, Q=None, R=None, P=None,
+                 xl=None, xh=None, ul=None, uh=None, N=4, x0=None, time=None):
+
+        if not A.any():
+            self.Q = 5*np.diag((0.5, 1, 0))
+            self.P = 2*np.diag((5, 5, 5))   # terminal state penalty
+            self.R = np.eye(2)
+
+            self.A = np.array([[-0.79, -0.3, -0.1], [0.5, 0.82, 1.23], [0.52, -0.3, -0.5]])
+            self.B = np.array([[-2.04, -0.21], [-1.28, 2.75], [0.29, -1.41]])
+            self.C = np.diag((0, 1, 0))
+
+            self.t = np.linspace(0, 1, 50)
+
+            self.ul, self.uh, self.xl, self.xh = np.array([[-2.], [-3.]]), np.array([[2.], [3.]]), np.array([[-10.], [-9.], [-8.]]), np.array([[10.], [9.], [8.]])
+            self.x0 = np.array([[0.0], [0.0], [0.0]])
+            self.N = 3   # # Prediction horizon
+
+        else:
+            self.Q = Q  # state penalty
+            self.P = P  # terminal state penalty
+            self.R = R  # input penalty
+
+            # x_dot = A x + B u
+            self.A = A  # linear system dynamics matrix
+            self.B = B  # input matrix
+            self.C = C  # output matrix
+
+            self.t = time
+
+            self.ul, self.uh, self.xl, self.xh = ul, uh, xl, xh
+            self.x0 = x0
+            self.N = N  # # Prediction horizon
+
         self.optCurve, self.costs = [], []
         self.omega = 0.5
-        # self.Q = 0.15*sp.eye(3)
-        # self.R = 0.5*sp.eye(2)
-        # self.A = sp.Matrix([[0, 0, 1, 0], [0, 0, 0, 1], [0, 0, 0, 0], [0, 0, 0, 0]])
-        # self.B = sp.Matrix([[0, 0], [0, 0], [1, 0], [0, 1]])
-        self.Q = 5*np.diag((0.5, 1, 0))
-        # self.P = 2*np.diag((0.5, 1, 0))   # terminal state penalty
-        self.P = 2*np.diag((5, 5, 5))   # terminal state penalty
-        self.R = np.eye(2)
-        # self.A = sp.Matrix([[-0.79, -0.3, -0.1],[0.5, 0.82, 1.23], [0.52, -0.3, -0.5]])
-        # self.B = sp.Matrix([[-2.04, -0.21], [-1.28, 2.75], [0.29, -1.41]])
-
-        self.A = np.array([[-0.79, -0.3, -0.1], [0.5, 0.82, 1.23], [0.52, -0.3, -0.5]])
-        self.B = np.array([[-2.04, -0.21], [-1.28, 2.75], [0.29, -1.41]])
-        self.C = np.diag((0, 1, 0))
-
-        # self.B = np.array([[-2.04, -0.21], [-1.28, 2.75], [0.29, -1.41]])
-        # self.B = 3*np.eye(3, 2)
-        # self.A = 2*np.eye(3)
-
-        self.t = np.linspace(0, 1, 50)
-
-        self.ul, self.uh, self.xl, self.xh = np.array([[-2.], [-3.]]), np.array([[2.], [3.]]), np.array([[-10.], [-9.], [-8.]]), np.array([[10.], [9.], [8.]])
-        self.x0 = np.array([[0.0], [0.0], [0.0]])
-        self.N = 3   # # Prediction horizon
         self.dyn = dynamics()
         self.kin = kinematics()
 
@@ -100,17 +108,11 @@ class mpc_opt():
         Sx, Su = self.transfer_matrices()
         Qs, Rs, Cs = self.penalties()
         Q_blk = self.block_diag(Qs, self.P)
-        # x_N = self.plant(Sx, Su, x0, u)
-
         G = 2 * (Rs + Su.transpose() @ Q_blk @ Su)
         F = 2 * (Su.transpose() @ Q_blk @ Sx)
         K = 2 * Su.transpose() @ Q_blk
-
-        # y = Cs @ x_N
         y_ref = self.ref_trajectory(t)
         y_ref_lifted = np.tile(y_ref, (N, 1))
-        # error = y_ref_lifted - y
-        # cost = error.transpose() @ Q_blk @ error + u.transpose() @ Rs @ u + x0.transpose() @ self.Q @ x0
         cost = 0.5 * u.transpose() @ G @ u + u.transpose() @ F @ x0 - u.transpose() @ K @ y_ref_lifted
         return cost
 
@@ -202,28 +204,27 @@ class mpc_opt():
         U = U.x
         return U
 
+    def get_state_and_input(self, u0, x0):
+        X, U = np.zeros((len(x0), len(self.t))), np.zeros((len(u0), len(self.t)))
+        u0 = np.tile(u0, (self.N, 1))
+        nx, nu = self.B.shape
+        for i in range(len(self.t)):
+            print('i = :', i)
+            U[:, i], X[:, i] = u0[0:nu].transpose(), x0.transpose()
+            u = self.optimise(u0, x0, i, )
+            u0 = u
+            u = u[0:nu].reshape(nu, -1)
+            x0 = x0.reshape(len(x0), -1)
+            x0 = self.A @ x0 + self.B @ u
+        return X, U
+
 
 if __name__ == '__main__':
     mpc = mpc_opt()
-    # mpc.constraints()
-    # P, H = mpc.imgpc_predmat(mpc.A, mpc.B, np.eye(3), 0, 5)
     pos = sp.zeros(3, len(mpc.t))
     x0, u0, = np.array([[0.0], [0.0], [0.0]]), np.array([[0.4], [0.2]])
-    X, U = np.zeros((len(x0), len(mpc.t))), np.zeros((len(u0), len(mpc.t)))
-    nx, nu = mpc.B.shape
 
-    # ######## loop for cost_function ###########
-
-    u0 = np.tile(u0, (mpc.N, 1))
-
-    for i in range(len(mpc.t)):
-        print('i = :', i)
-        U[:, i], X[:, i] = u0[0:nu].transpose(), x0.transpose()
-        u = mpc.optimise(u0, x0, i,)
-        u0 = u
-        u = u[0:nu].reshape(nu, -1)
-        x0 = x0.reshape(len(x0), -1)
-        x0 = mpc.A @ x0 + mpc.B @ u
+    X, U = mpc.get_state_and_input(u0, x0)
 
     plt.figure(1)
     plt.plot(X[0, :], '--r')
