@@ -25,10 +25,10 @@ if __name__ == '__main__':
     ul, uh, xl, xh = np.array([[-2.], [-3.]]), np.array([[2.], [3.]]), np.array(
         [[-10.], [-9.], [-8.]]), np.array([[10.], [9.], [8.]])   # input and state lower and upper limits
     N = 3  # Prediction horizon (control horizon is assumed to be the same)
-
+    ref_traj = np.array([[0], [2], [0]])
     x0, u0, = np.array([[0.0], [0.0], [0.0]]), np.array([[0.4], [0.2]])  # initial state and input guess
 
-    mpc = mpc_opt(Q=Q, P=P, R=R, A=A, B=B, C=C, time=t, ul=ul, uh=uh, xl=xl, xh=xh, N=N)
+    mpc = mpc_opt(Q=Q, P=P, R=R, A=A, B=B, C=C, time=t, ul=ul, uh=uh, xl=xl, xh=xh, N=N, ref_traj=ref_traj)
     X, U = mpc.get_state_and_input(u0, x0)
 
     plt.figure(1)
