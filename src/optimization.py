@@ -23,13 +23,23 @@ class mpc_opt():
                  xl=None, xh=None, ul=None, uh=None, N=4, x0=None, time=None, ref_traj=None):
 
         if not isinstance(A, (list, tuple, np.ndarray)):
-            self.Q = 5*np.diag((0.5, 1, 0))
-            self.P = 2*np.diag((5, 5, 5))   # terminal state penalty
-            self.R = np.eye(2)
-
             self.A = np.array([[-0.79, -0.3, -0.1], [0.5, 0.82, 1.23], [0.52, -0.3, -0.5]])
             self.B = np.array([[-2.04, -0.21], [-1.28, 2.75], [0.29, -1.41]])
-            self.C = np.diag((0, 1, 0))
+            self.C = np.array([[0, 1, 0]])
+
+            self.P = 4   # terminal state penalty
+            self.Q = 5
+            if isinstance(P, (list, tuple, np.ndarray)):
+                self.P = self.C.transpose() @ self.P @ self.C
+                self.P_dd = self.C.transpose() @ self.P
+                self.Q = self.C.transpose() @ self.Q @ self.C
+                self.Q_dd = self.C.transpose() @ self.Q
+            else:
+                self.P = self.P * self.C.transpose() @ self.C
+                self.P_dd = self.P * self.C.transpose()
+                self.Q = self.Q * self.C.transpose() @ self.C
+                self.Q_dd = self.Q * self.C.transpose()
+            self.R = np.eye(2)
 
             self.t = np.linspace(0, 1, 50)
 
@@ -39,14 +49,25 @@ class mpc_opt():
             self.y_ref = np.array([[0], [2], [0]])
 
         else:
-            self.Q = Q  # state penalty
-            self.P = P  # terminal state penalty
-            self.R = R  # input penalty
-
             # x_dot = A x + B u
             self.A = A  # linear system dynamics matrix
             self.B = B  # input matrix
             self.C = C  # output matrix
+
+            if isinstance(P, (list, tuple, np.ndarray)):
+                self.P = C.transpose() @ P @ C
+                self.P_dd = C.transpose() @ P
+                self.Q = C.transpose() @ Q @ C
+                self.Q_dd = C.transpose() @ Q
+            else:
+                self.P = P * C.transpose() @ C
+                self.P_dd = P * C.transpose()
+                self.Q = Q * C.transpose() @ C
+                self.Q_dd = Q * C.transpose()
+            self.R = R
+
+            # if self.C.shape[0] != self.P.shape[0]:
+            #     raise ValueError(' DIMENSION MISMATCH: Both C and P should have same number of rows')
 
             self.t = time
 
@@ -67,37 +88,41 @@ class mpc_opt():
     def transfer_matrices(self,):
         N = self.N
         nx, nu = self.B.shape
-        rC, cC = self.C.shape
-        Su = np.zeros((N*rC, N*nu))
-        # Su = np.zeros((N * nx, N * nu))
-        Sx = self.C @ self.A
+        # rC, cC = self.C.shape
+        # Su = np.zeros((N*rC, N*nu))
+        Su = np.zeros((N * nx, N * nu))
+        Sx = self.A
         An = self.A @ self.A
         for i in range(N-1):
-            Sx = np.concatenate((Sx, self.C @ An), axis=0)
+            Sx = np.concatenate((Sx, An), axis=0)
             An = An @ self.A
         B = self.B
         for i in range(N):
-            Su = Su + np.kron(np.eye(N, k=-i), self.C @ B)
+            Su = Su + np.kron(np.eye(N, k=-i), B)
             B = self.A @ B
         return Sx, Su
+
+    def plant_prediction(self, Sx, Su, x0, u):
+        x = Sx @ x0 + Su @ u
+        return x
 
     def penalties(self, ):
         N = self.N
         if N == 1:
-            Qs = self.Q
+            Qs = self.Q   # Q stacked as diagonal
+            Qs_d = self.Q_dd
         else:
-            Qs = np.kron(np.eye(N - 1), self.Q)
-        return Qs, np.kron(np.eye(N), self.R), np.kron(np.eye(N), self.C)
-
-    def plant(self, Sx, Su, x0, u):
-        x = Sx @ x0 + Su @ u
-        return x
+            Qs = np.kron(np.eye(N - 1), self.Q)   #  Q stacked as diagonal
+            Qs_d = np.kron(np.eye(N - 1), self.Q_dd)
+        return Qs, Qs_d, np.kron(np.eye(N), self.R), np.kron(np.eye(N), self.C)
 
     def block_diag(self, Q, P):
         N = self.N
         rQ, cQ = Q.shape
-        rP, cP = P.shape
-        np.kron(np.eye(N-1), Q)
+        if isinstance(P, (list, tuple, np.ndarray)):
+            rP, cP = P.shape
+        else:
+            rP, cP = 1, 1
         t1 = np.zeros((rP+rQ, cQ+cP))
         if N != 1:
             t1[0:rQ, 0:cQ] = Q
@@ -113,18 +138,34 @@ class mpc_opt():
         N = self.N
         u = u.reshape(len(u), -1)
         Sx, Su = self.transfer_matrices()
-        Qs, Rs, Cs = self.penalties()
-        Q_blk = self.block_diag(Qs, self.P)
-        G = 2 * (Rs + Su.transpose() @ Q_blk @ Su)
-        F = 2 * (Su.transpose() @ Q_blk @ Sx)
-        K = 2 * Su.transpose() @ Q_blk
-        # y_ref = self.ref_trajectory(t)
-        y_ref_lifted = np.tile(self.y_ref, (N, 1))
-        cost = 0.5 * u.transpose() @ G @ u + u.transpose() @ F @ x0 - u.transpose() @ K @ y_ref_lifted
+        Qs, Qs_d, H, Cs = self.penalties()
+        F = self.block_diag(Qs, self.P)
+        G = self.block_diag(Qs_d, self.P_dd)
+
+        J = 2 * (Su.transpose() @ F @ Su + H)
+        K = 2 * Su.transpose() @ F @ Sx
+        L = 2 * Su.transpose() @ G
+
+        # G = 2 * (Rs + Su.transpose() @ Q_blk @ Su)
+        # F = 2 * (Su.transpose() @ Q_blk @ Sx)
+        # K = 2 * Su.transpose() @ Q_blk
+
+        # temp1, temp2 = Cs @ Su, Cs @ Sx
+        # G = 2 * temp1.transpose() @ Q_blk @ temp1 + Rs
+        # F = 2 * temp1.transpose() @ Q_blk @ temp2
+        # K = 2 * temp1.transpose() @ Q_blk
+        if self.y_ref.shape[1] > 1:
+            y_ref = self.y_ref[:, t].reshape(len(self.y_ref[:, t]), -1)
+        else:
+            y_ref = self.y_ref
+        y_ref_lifted = np.tile(y_ref, (N, 1))
+        # cost = np.abs(0.5 * u.transpose() @ J @ u + u.transpose() @ K @ x0 - u.transpose() @ L @ y_ref_lifted)
+        cost = 0.5 * u.transpose() @ J @ u + u.transpose() @ K @ x0 - u.transpose() @ L @ y_ref_lifted
+        print(cost)
         return cost
 
     # @staticmethod
-    def ref_trajectory(self, i):  
+    def ref_trajectory(self, i):
         return self.y_ref[:, i]
 
     def cost_gradient(self, u, *args):
@@ -132,7 +173,7 @@ class mpc_opt():
         N = self.N
         u = u.reshape(len(u), -1)
         Sx, Su = self.transfer_matrices()
-        Qs, Rs, Cs = self.penalties()
+        Qs, Qs_d, Rs, Cs = self.penalties()
         Q_blk = self.block_diag(Qs, self.P)
         G = 2 * (Rs + Su.transpose() @ Q_blk @ Su)
         F = 2 * (Su.transpose() @ Q_blk @ Sx)
