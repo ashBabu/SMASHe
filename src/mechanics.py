@@ -25,13 +25,13 @@ class kinematics():
         self.qd = [self.q1d, self.q2d]
         self.l1, self.l2 = symbols('l_1 l_2', positive=True)
         # self.l = [self.l1, self.l2]
-        self.l = [2.0, 2.0] ############################
+        self.l = [1.5, 1.0]  ############################
 
         # COM vectors
         self.r1, self.r2 = symbols('r1 r2')
         self.r11 = zeros(3, 1)
         # self.r11[0] = self.r1
-        self.r11[0] = 1 ################################
+        self.r11[0] = 1  ################################
         self.r22 = zeros(3, 1)
         # self.r22[0] = self.r2
         self.r22[0] = 1  #################################
@@ -113,6 +113,15 @@ class kinematics():
         Rot_0_eff = T_0_eff[0:3, 0:3]
         pos_0_eff = T_0_eff[0:3, 3]
         return pos_0_eff, Rot_0_eff
+
+    def inv_kin(self, X):
+        a = X[0]**2 + X[1]**2 - self.l[0]**2 - self.l[1]**2
+        b = 2 * self.l[0] * self.l[1]
+        q2 = np.arccos(a/b)
+        c = np.arctan2(X[1], X[0])
+        q1 = c - np.arctan2(self.l[1] * np.sin(q2), (self.l[0] + self.l[1]*np.cos(q2)))
+        return q1, q2
+
 
     def velocities(self, q):
         omega = Matrix.zeros(3, len(q)+1)
