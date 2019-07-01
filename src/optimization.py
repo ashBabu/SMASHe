@@ -88,8 +88,6 @@ class mpc_opt():
     def transfer_matrices(self,):
         N = self.N
         nx, nu = self.B.shape
-        # rC, cC = self.C.shape
-        # Su = np.zeros((N*rC, N*nu))
         Su = np.zeros((N * nx, N * nu))
         Sx = self.A
         An = self.A @ self.A
@@ -142,26 +140,16 @@ class mpc_opt():
         F = self.block_diag(Qs, self.P)
         G = self.block_diag(Qs_d, self.P_dd)
 
-        J = 2 * (Su.transpose() @ F @ Su + H)
+        W = 2 * (Su.transpose() @ F @ Su + H)
         K = 2 * Su.transpose() @ F @ Sx
         L = 2 * Su.transpose() @ G
 
-        # G = 2 * (Rs + Su.transpose() @ Q_blk @ Su)
-        # F = 2 * (Su.transpose() @ Q_blk @ Sx)
-        # K = 2 * Su.transpose() @ Q_blk
-
-        # temp1, temp2 = Cs @ Su, Cs @ Sx
-        # G = 2 * temp1.transpose() @ Q_blk @ temp1 + Rs
-        # F = 2 * temp1.transpose() @ Q_blk @ temp2
-        # K = 2 * temp1.transpose() @ Q_blk
         if self.y_ref.shape[1] > 1:
             y_ref = self.y_ref[:, t].reshape(len(self.y_ref[:, t]), -1)
         else:
             y_ref = self.y_ref
         y_ref_lifted = np.tile(y_ref, (N, 1))
-        # cost = np.abs(0.5 * u.transpose() @ J @ u + u.transpose() @ K @ x0 - u.transpose() @ L @ y_ref_lifted)
-        cost = 0.5 * u.transpose() @ J @ u + u.transpose() @ K @ x0 - u.transpose() @ L @ y_ref_lifted
-        print(cost)
+        cost = 0.5 * u.transpose() @ W @ u + u.transpose() @ K @ x0 - u.transpose() @ L @ y_ref_lifted
         return cost
 
     # @staticmethod
