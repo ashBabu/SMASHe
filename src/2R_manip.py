@@ -1,6 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from optimization import mpc_opt
+from mpc_optimizer import mpc_opt
 from mechanics import dynamics, kinematics
 
 
@@ -30,7 +30,7 @@ class Rmanip_mpc():
         self.x0, self.u0, = np.array([[0.1], [0.2], [0.4], [0.1]]), np.array([[1.4], [2.3]])  # initial state and input guess
 
     def end_effec_pose(self, q):
-        pos, _ = self.kin.fwd_kin_numeric(self.kin.l, q)
+        pos, _ = self.kin.fwd_kin_numeric(self.kin.ln, q)
         return pos
 
     def ref_traj(self,):   # track a circle or radius 'r' and centre at (x, y)
@@ -84,7 +84,7 @@ if __name__ == '__main__':
     two_R = Rmanip_mpc()
     ref_circle = two_R.ref_traj()
     ref_eight = two_R.ref_traj2()
-    ref_traj = two_R.ref_traj()
+    ref_traj = two_R.ref_traj2()
     two_R.mpc = mpc_opt(Q=two_R.Q, P=two_R.P, R=two_R.R, A=two_R.A, B=two_R.B, C=two_R.C, time=two_R.t, ul=two_R.ul,
                        uh=two_R.uh, xl=two_R.xh, N=two_R.N, ref_traj=two_R.ref_traj_joint_space(ref_traj))
 
@@ -95,24 +95,35 @@ if __name__ == '__main__':
     for i in range(q.shape[1]):  # to get the end-point of 1st link
         temp = np.array(two_R.end_effec_pose(q[:, i])).astype(np.float64)
         pos[:, i] = temp.reshape(-1, len(temp))
-        a = np.array(two_R.kin.l[0] * np.cos(q[0, i])).astype(np.float64)
-        b = np.array(two_R.kin.l[0] * np.sin(q[0, i])).astype(np.float64)
+        a = np.array(two_R.kin.ln[0] * np.cos(q[0, i])).astype(np.float64)
+        b = np.array(two_R.kin.ln[0] * np.sin(q[0, i])).astype(np.float64)
         x[:, i] = a, b #np.vstack((a, b))
+
+    lp, q_dot = two_R.kin.ln, X[2:4, :]
+    inp = np.zeros((2, q.shape[1]))
+    for i in range(q.shape[1]):
+        M, C, G = two_R.dyn.dyn_para_numeric(lp, q[:, i], q_dot[:, i])
+        M, C, G = np.array(M).astype(np.float64), np.array(C).astype(np.float64), np.array(G).astype(np.float64)
+        temp = M @ U[:, i].reshape((2, 1)) + C + G
+        inp[:, i] = temp[0, 0], temp[1, 0]
+
     two_R.plotter(x, pos, ref_traj)    # Animation
     plt.figure()
     plt.plot(U.transpose())
-    plt.title('Input')
+    plt.title('Linear_system_input')
     plt.xlabel('time')
     #
     plt.figure()
     plt.plot(ref_traj[0, :], ref_traj[1, :], '--r')
     plt.plot(pos[0, :], pos[1, :], '*b')
-    plt.show(block=True)
-    print('hi')
+    plt.gca().set_aspect('equal', adjustable='box')
 
-    # plt.figure()
-    # plt.plot(X.transpose())
-    # plt.xlabel('time')
-    # plt.title('states')
+    # print('hi')
+
+    plt.figure()
+    plt.plot(inp.transpose())
+    plt.xlabel('time')
+    plt.title('actual_inputs')
+    plt.show(block=True)
     #
     #
