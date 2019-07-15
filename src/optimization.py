@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 #   x_{min} <= x_k  <= x_{max} \\
 #   u_{min} <= u_k  <= u_{max} \\
 #   x_0 = x_bar
+# This code is valid for Linear Systems
 
 # TODO:
 # 1. Code for adding control horizon
