@@ -122,6 +122,24 @@ class kinematics():
         q1 = c - np.arctan2(self.l[1] * np.sin(q2), (self.l[0] + self.l[1]*np.cos(q2)))
         return q1, q2
 
+    def inv_kin_optfun(self, q):
+        # a = np.array(two_R.end_effec_pose(q[:, i])).astype(np.float64)
+        pos_0_eff, _ = self.fwd_kin_numeric(self.l, q)
+        pos_0_eff = np.array(pos_0_eff[0:2]).astype(np.float64)
+        k = pos_0_eff.reshape(-1) - self.T_desired
+        # k = np.reshape(k, (16, 1))
+        k = k.transpose() @ k
+        return k
+
+    def inv_kin2(self, q_current, T_desired):  # Implements Min. (F(q) - T_desired) = 0
+        x0 = q_current
+        self.T_desired = T_desired
+        final_theta = opt.minimize(self.inv_kin_optfun, x0,
+                                   method='BFGS', )  # jac=self.geometric_jacobian(T_joint, T_current))
+        # print 'res \n', final_theta
+        # final_theta = np.insert(final_theta.x, self.numJoints, 0)  # Adding 0 at the end for the fixed joint
+
+        return final_theta.x
 
     def velocities(self, q):
         omega = Matrix.zeros(3, len(q)+1)
