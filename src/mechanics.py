@@ -24,8 +24,8 @@ class kinematics():
         self.q = [self.q1, self.q2]
         self.qd = [self.q1d, self.q2d]
         self.l1, self.l2 = symbols('l_1 l_2', positive=True)
-        # self.l = [self.l1, self.l2]
-        self.l = [1.5, 1.0]  ############################
+        self.l = [self.l1, self.l2]
+        self.ln = [1.5, 1.0]  ############################
 
         # COM vectors
         self.r1, self.r2 = symbols('r1 r2')
@@ -115,11 +115,11 @@ class kinematics():
         return pos_0_eff, Rot_0_eff
 
     def inv_kin(self, X):
-        a = X[0]**2 + X[1]**2 - self.l[0]**2 - self.l[1]**2
-        b = 2 * self.l[0] * self.l[1]
+        a = X[0]**2 + X[1]**2 - self.ln[0]**2 - self.ln[1]**2
+        b = 2 * self.ln[0] * self.ln[1]
         q2 = np.arccos(a/b)
         c = np.arctan2(X[1], X[0])
-        q1 = c - np.arctan2(self.l[1] * np.sin(q2), (self.l[0] + self.l[1]*np.cos(q2)))
+        q1 = c - np.arctan2(self.ln[1] * np.sin(q2), (self.ln[0] + self.ln[1]*np.cos(q2)))
         return q1, q2
 
     def inv_kin_optfun(self, q):
@@ -176,6 +176,8 @@ class dynamics():
         self.I = [self.I1, self.I2]
 
         self.kin = kinematics()
+        self.M, self.C, self.G = self.get_dyn_para(self.kin.q, self.kin.qd)
+
 
     def kinetic_energy(self, q):
         w, cm_vel, _ = self.kin.velocities(q)
@@ -206,12 +208,12 @@ class dynamics():
         # Matrix([P]).applyfunc(trigsimp)
         return M, C, G
 
-    def dyn_para_numeric(self, lp, qp, qdp):
-        M, C, G = self.get_dyn_para(self.kin.q, self.kin.qd)
+    def dyn_para_numeric(self, lp, qp, q_dot):
+        M, C, G = self.M, self.C, self.G
         for i in range(len(qp)):
-            M = M.subs([(self.kin.q[i], qp[i]), (self.kin.l[i], lp[i])])
-            C = C.subs([(self.kin.q[i], qp[i]), (self.kin.l[i], lp[i]), (self.kin.qd[i], qdp[i])])
-            G = G.subs([(self.kin.q[i], qp[i]), (self.kin.l[i], lp[i])])
+            M = M.subs({self.kin.q[i]: qp[i], self.kin.l[i]: lp[i]})
+            C = msubs(C, {self.kin.q[i]: qp[i], self.kin.l[i]: lp[i], self.kin.q[i].diff(): q_dot[i]})
+            G = G.subs({self.kin.q[i]: qp[i], self.kin.l[i]: lp[i], self.g: 9.81})
         return M, C, G
 
     def round2zero(self, m, e):
@@ -225,9 +227,9 @@ if __name__ == '__main__':
 
     kin = kinematics()
     dyn = dynamics()
-    lp, qp, qdp = [1, 1], [0, np.pi/2], [0.1, 0.2]
-    M, C, G = dyn.get_dyn_para(kin.q, kin.qd)  # Symbolic dynamic parameters
-    # M, C, G = kin.dyn_para_numeric(lp, qp, qdp)  # Numeric values dynamic parameters
+    lp, qp, q_dot = [1, 1], [0, np.pi], [0.1, 0.2]
+    # M, C, G = dyn.get_dyn_para(kin.q, kin.qd)  # Symbolic dynamic parameters
+    M, C, G = dyn.dyn_para_numeric(lp, qp, q_dot)  # Numeric values dynamic parameters
     print ('hi')
 
 
