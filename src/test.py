@@ -1,5 +1,5 @@
 import numpy as np
-from optimization import mpc_opt
+from mpc_optimizer import mpc_opt
 import matplotlib.pyplot as plt
 
 # Model Predictive Control
