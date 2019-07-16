@@ -211,9 +211,9 @@ class dynamics():
     def dyn_para_numeric(self, lp, qp, q_dot):
         M, C, G = self.M, self.C, self.G
         for i in range(len(qp)):
-            M = M.subs({self.kin.q[i]: qp[i], self.kin.l[i]: lp[i]})
+            M = msubs(M, {self.kin.q[i]: qp[i], self.kin.l[i]: lp[i]})
             C = msubs(C, {self.kin.q[i]: qp[i], self.kin.l[i]: lp[i], self.kin.q[i].diff(): q_dot[i]})
-            G = G.subs({self.kin.q[i]: qp[i], self.kin.l[i]: lp[i], self.g: 9.81})
+            G = msubs(G, {self.kin.q[i]: qp[i], self.kin.l[i]: lp[i], self.g: 9.81})
         return M, C, G
 
     def round2zero(self, m, e):
@@ -227,7 +227,7 @@ if __name__ == '__main__':
 
     kin = kinematics()
     dyn = dynamics()
-    lp, qp, q_dot = [1, 1], [0, np.pi], [0.1, 0.2]
+    lp, qp, q_dot = [1, 1], [0, np.pi/2], [0.1, 0.2]
     # M, C, G = dyn.get_dyn_para(kin.q, kin.qd)  # Symbolic dynamic parameters
     M, C, G = dyn.dyn_para_numeric(lp, qp, q_dot)  # Numeric values dynamic parameters
     print ('hi')
