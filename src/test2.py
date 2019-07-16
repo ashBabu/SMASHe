@@ -14,43 +14,66 @@ import matplotlib.pyplot as plt
 
 # TODO:
 # 1. Code for adding control horizon
+# 2.  Add jacobian in optimization to speed up
 
 
 class mpc_opt():
 
     def __init__(self, A=None, B=None, C=None, Q=None, R=None, P=None,
-                 xl=None, xh=None, ul=None, uh=None, N=4, x0=None, time=None):
+                 xl=None, xh=None, ul=None, uh=None, N=4, x0=None, time=None, ref_traj=None):
 
-        if not A.any():
-            self.Q = 5*np.diag((0.5, 1, 0))
-            self.P = 2*np.diag((5, 5, 5))   # terminal state penalty
-            self.R = np.eye(2)
+        if not isinstance(A, (list, tuple, np.ndarray)):
 
             self.A = np.array([[-0.79, -0.3, -0.1], [0.5, 0.82, 1.23], [0.52, -0.3, -0.5]])
             self.B = np.array([[-2.04, -0.21], [-1.28, 2.75], [0.29, -1.41]])
-            self.C = np.diag((0, 1, 0))
+            self.C = np.array([[0, 1, 0]])
+
+            self.Pd = 4   # terminal state penalty
+            self.Qd = 5
+            if isinstance(P, (list, tuple, np.ndarray)):
+                self.P = self.C.transpose() @ self.Pd @ self.C
+                self.Q = self.C.transpose() @ self.Qd @ self.C
+            else:
+                self.Q = self.Qd * self.C.transpose() @ self.C
+                self.P = self.Pd * self.C.transpose() @ self.C
+            self.R = np.eye(2)
 
             self.t = np.linspace(0, 1, 50)
 
             self.ul, self.uh, self.xl, self.xh = np.array([[-2.], [-3.]]), np.array([[2.], [3.]]), np.array([[-10.], [-9.], [-8.]]), np.array([[10.], [9.], [8.]])
             self.x0 = np.array([[0.0], [0.0], [0.0]])
             self.N = 3   # # Prediction horizon
+            self.y_ref = np.array([[0], [2], [0]])
 
         else:
-            self.Q = Q  # state penalty
-            self.P = P  # terminal state penalty
-            self.R = R  # input penalty
+
 
             # x_dot = A x + B u
             self.A = A  # linear system dynamics matrix
             self.B = B  # input matrix
             self.C = C  # output matrix
 
+            if isinstance(P, (list, tuple, np.ndarray)):
+                self.P = C.transpose() @ P @ C
+                self.P_dd = C.transpose() @ P
+                self.Q = C.transpose() @ Q @ C
+                self.Q_dd = C.transpose() @ Q
+            else:
+                self.P = P * C.transpose() @ C
+                self.P_dd = P * C.transpose()
+                self.Q = Q * C.transpose() @ C
+                self.Q_dd = Q * C.transpose()
+            self.R = R
+
+            # if self.C.shape[0] != self.P.shape[0]:
+            #     raise ValueError(' DIMENSION MISMATCH: Both C and P should have same number of rows')
+
             self.t = time
 
             self.ul, self.uh, self.xl, self.xh = ul, uh, xl, xh
             self.x0 = x0
             self.N = N  # # Prediction horizon
+            self.y_ref = ref_traj
 
         self.optCurve, self.costs = [], []
         self.omega = 0.5
@@ -63,37 +86,46 @@ class mpc_opt():
 
     def transfer_matrices(self,):
         N = self.N
-        nx, nB = self.B.shape
-        Su = np.zeros((N*nx, N*nB))
-        Sx = self.C @ self.A
+        nx, nu = self.B.shape
+        # rC, cC = self.C.shape
+        # Su = np.zeros((N*rC, N*nu))
+        Su = np.zeros((N * nx, N * nu))
+        Sx = self.A
         An = self.A @ self.A
         for i in range(N-1):
-            Sx = np.concatenate((Sx, self.C @ An), axis=0)
+            Sx = np.concatenate((Sx, An), axis=0)
             An = An @ self.A
         B = self.B
         for i in range(N):
-            Su = Su + np.kron(np.eye(N, k=-i), self.C @ B)
+            Su = Su + np.kron(np.eye(N, k=-i), B)
             B = self.A @ B
         return Sx, Su
+
+    def plant_prediction(self, Sx, Su, x0, u):
+        x = Sx @ x0 + Su @ u
+        return x
 
     def penalties(self, ):
         N = self.N
         if N == 1:
             Qs = self.Q
+            Qs_d = self.Q_dd
         else:
             Qs = np.kron(np.eye(N - 1), self.Q)
-        return Qs, np.kron(np.eye(N), self.R), np.kron(np.eye(N), self.C)
-
-    def plant(self, Sx, Su, x0, u):
-        x = Sx @ x0 + Su @ u
-        return x
+            Qs_d = np.kron(np.eye(N - 1), self.Q_dd)
+        return Qs, Qs_d, np.kron(np.eye(N), self.R), np.kron(np.eye(N), self.C)
 
     def block_diag(self, Q, P):
         N = self.N
-        nx, nu = self.B.shape
-        t1 = np.zeros((N * nx, N * nx))
+        rQ, cQ = Q.shape
+        if isinstance(P, (list, tuple, np.ndarray)):
+            rP, cP = P.shape
+        else:
+            rP, cP = 1, 1
+        np.kron(np.eye(N-1), Q)
+        t1 = np.zeros((rP+rQ, cQ+cP))
         if N != 1:
-            t1[0:(N - 1) * nx, 0:(N - 1) * nx] = Q
+            t1[0:rQ, 0:cQ] = Q
         else:
             t1 = Q
         t2 = np.zeros((N, N))
@@ -106,54 +138,45 @@ class mpc_opt():
         N = self.N
         u = u.reshape(len(u), -1)
         Sx, Su = self.transfer_matrices()
-        Qs, Rs, Cs = self.penalties()
+        Qs, Qs_d, H, Cs = self.penalties()
+        F = self.block_diag(Qs, self.P)
+        G = self.block_diag(Qs_d, self.P_dd)
+
+        J = 2 * (Su.transpose() @ F @ Su + H)
+        K = 2 * Su.transpose() @ F @ Sx
+        L = 2 * Su.transpose() @ G
+
+        # G = 2 * (Rs + Su.transpose() @ Q_blk @ Su)
+        # F = 2 * (Su.transpose() @ Q_blk @ Sx)
+        # K = 2 * Su.transpose() @ Q_blk
+
+        # temp1, temp2 = Cs @ Su, Cs @ Sx
+        # G = 2 * temp1.transpose() @ Q_blk @ temp1 + Rs
+        # F = 2 * temp1.transpose() @ Q_blk @ temp2
+        # K = 2 * temp1.transpose() @ Q_blk
+        y_ref = self.y_ref[:, t].reshape(len(self.y_ref[:, t]), -1)
+        y_ref_lifted = np.tile(y_ref, (N, 1))
+        cost = 0.5 * u.transpose() @ J @ u + u.transpose() @ K @ x0 - u.transpose() @ L @ y_ref_lifted
+        return cost
+
+    # @staticmethod
+    def ref_trajectory(self, i):
+        return self.y_ref[:, i]
+
+    def cost_gradient(self, u, *args):
+        x0, t = args
+        N = self.N
+        u = u.reshape(len(u), -1)
+        Sx, Su = self.transfer_matrices()
+        Qs, Qs_d, Rs, Cs = self.penalties()
         Q_blk = self.block_diag(Qs, self.P)
         G = 2 * (Rs + Su.transpose() @ Q_blk @ Su)
         F = 2 * (Su.transpose() @ Q_blk @ Sx)
         K = 2 * Su.transpose() @ Q_blk
-        y_ref = self.ref_trajectory(t)
-        y_ref_lifted = np.tile(y_ref, (N, 1))
-        cost = 0.5 * u.transpose() @ G @ u + u.transpose() @ F @ x0 - u.transpose() @ K @ y_ref_lifted
-        return cost
-
-    def end_effec_pose(self, q):
-        pos, _ = self.kin.fwd_kin_numeric(self.kin.l, q)
-        return pos
-
-    # @staticmethod
-    def ref_trajectory(self, i):  # y = 3*sin(2*pi*omega*t)
-        # y_ref = 3 * np.sin(2*np.pi*self.omega*self.t[i])
-        y_ref = np.array([[0], [2], [0]])
-        return y_ref
-        # return sp.Matrix(([[self.t[i]], [y], [0]]))
-
-    def cost_function_old(self, u, *args):
-        x0, t = args
-        u = u.reshape(len(u), -1)
-        x0 = x0.reshape(len(x0), -1)
-        x = self.A @ x0 + self.B @ u
-        y = self.C @ x
-        # q = [x1[0], x1[1]]
-        # pos = self.end_effec_pose(q)
-        y_ref = self.ref_trajectory(t)
-        error = y - y_ref
-        cost = error.transpose() @ self.Q @ error + u.transpose() @ self.R @ u
-        return cost
-
-    def cost_gradient(self, u, *args):
-        N = self.N
-        x0, t = args
-        u = u.reshape(len(u), -1)
-        Sx, Su = self.transfer_matrices(N)
-        Qs, Rs, Cs = self.penalties(N)
-        Q_blk = self.block_diag(Qs, self.P)
-        x_N = self.plant(Sx, Su, x0, u)
-        y = Cs @ x_N
-        y_ref = self.ref_trajectory(t)
-        y_ref_lifted = np.tile(y_ref, (N, 1))
-        error = y_ref_lifted - y
-        cost_gradient = np.vstack((Q_blk @ error, Rs @ u, self.Q @ x0))
-        return cost_gradient
+        # y_ref = self.ref_trajectory(t)
+        y_ref_lifted = np.tile(self.y_ref, (N, 1))
+        cost_gradient = np.vstack((0.5 * G @ u, F @ x0, -K @ y_ref_lifted, np.zeros((18, 1))))
+        return np.squeeze(cost_gradient)
 
     def constraints(self, u, *args):
         x0, t = args
@@ -196,11 +219,11 @@ class mpc_opt():
         #           'fun': self.con_eq,
         #           'args': (x0, t)}
 
-        U = opt.minimize(self.cost_function, u0, args=(x0, t), method='SLSQP',
-                         options={'maxiter': 200, 'disp': True}, constraints=[con_ineq])
+        # U = opt.minimize(self.cost_function, u0, args=(x0, t), method='SLSQP',
+        #                  options={'maxiter': 200, 'disp': True}, jac=self.cost_gradient, constraints=con_ineq)
 
-        # U = opt.minimize(self.cost_function2, u0, args=(x0, t), method='SLSQP',
-        #                  options={'maxiter': 200, 'disp': True})
+        U = opt.minimize(self.cost_function, u0, args=(x0, t), method='SLSQP',
+                         options={'maxiter': 200, 'disp': True},)# constraints=con_ineq)
         U = U.x
         return U
 
@@ -223,6 +246,9 @@ if __name__ == '__main__':
     mpc = mpc_opt()
     pos = sp.zeros(3, len(mpc.t))
     x0, u0, = np.array([[0.0], [0.0], [0.0]]), np.array([[0.4], [0.2]])
+
+    cg = mpc.cost_gradient(np.tile(u0, (mpc.N, 1)), x0, 1)
+    cons = mpc.constraints(np.tile(u0, (mpc.N, 1)), x0, 1)
 
     X, U = mpc.get_state_and_input(u0, x0)
 

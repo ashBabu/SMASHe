@@ -24,14 +24,14 @@ class kinematics():
         self.q = [self.q1, self.q2]
         self.qd = [self.q1d, self.q2d]
         self.l1, self.l2 = symbols('l_1 l_2', positive=True)
-        # self.l = [self.l1, self.l2]
-        self.l = [2.0, 2.0] ############################
+        self.l = [self.l1, self.l2]
+        self.ln = [1.5, 1.0]  ############################
 
         # COM vectors
         self.r1, self.r2 = symbols('r1 r2')
         self.r11 = zeros(3, 1)
         # self.r11[0] = self.r1
-        self.r11[0] = 1 ################################
+        self.r11[0] = 1  ################################
         self.r22 = zeros(3, 1)
         # self.r22[0] = self.r2
         self.r22[0] = 1  #################################
@@ -114,6 +114,33 @@ class kinematics():
         pos_0_eff = T_0_eff[0:3, 3]
         return pos_0_eff, Rot_0_eff
 
+    def inv_kin(self, X):
+        a = X[0]**2 + X[1]**2 - self.ln[0]**2 - self.ln[1]**2
+        b = 2 * self.ln[0] * self.ln[1]
+        q2 = np.arccos(a/b)
+        c = np.arctan2(X[1], X[0])
+        q1 = c - np.arctan2(self.ln[1] * np.sin(q2), (self.ln[0] + self.ln[1]*np.cos(q2)))
+        return q1, q2
+
+    def inv_kin_optfun(self, q):
+        # a = np.array(two_R.end_effec_pose(q[:, i])).astype(np.float64)
+        pos_0_eff, _ = self.fwd_kin_numeric(self.l, q)
+        pos_0_eff = np.array(pos_0_eff[0:2]).astype(np.float64)
+        k = pos_0_eff.reshape(-1) - self.T_desired
+        # k = np.reshape(k, (16, 1))
+        k = k.transpose() @ k
+        return k
+
+    def inv_kin2(self, q_current, T_desired):  # Implements Min. (F(q) - T_desired) = 0
+        x0 = q_current
+        self.T_desired = T_desired
+        final_theta = opt.minimize(self.inv_kin_optfun, x0,
+                                   method='BFGS', )  # jac=self.geometric_jacobian(T_joint, T_current))
+        # print 'res \n', final_theta
+        # final_theta = np.insert(final_theta.x, self.numJoints, 0)  # Adding 0 at the end for the fixed joint
+
+        return final_theta.x
+
     def velocities(self, q):
         omega = Matrix.zeros(3, len(q)+1)
         joint_velocity = Matrix.zeros(3, len(q)+1)
@@ -149,6 +176,8 @@ class dynamics():
         self.I = [self.I1, self.I2]
 
         self.kin = kinematics()
+        self.M, self.C, self.G = self.get_dyn_para(self.kin.q, self.kin.qd)
+
 
     def kinetic_energy(self, q):
         w, cm_vel, _ = self.kin.velocities(q)
@@ -179,12 +208,12 @@ class dynamics():
         # Matrix([P]).applyfunc(trigsimp)
         return M, C, G
 
-    def dyn_para_numeric(self, lp, qp, qdp):
-        M, C, G = self.get_dyn_para(self.kin.q, self.kin.qd)
+    def dyn_para_numeric(self, lp, qp, q_dot):
+        M, C, G = self.M, self.C, self.G
         for i in range(len(qp)):
-            M = M.subs([(self.kin.q[i], qp[i]), (self.kin.l[i], lp[i])])
-            C = C.subs([(self.kin.q[i], qp[i]), (self.kin.l[i], lp[i]), (self.kin.qd[i], qdp[i])])
-            G = G.subs([(self.kin.q[i], qp[i]), (self.kin.l[i], lp[i])])
+            M = msubs(M, {self.kin.q[i]: qp[i], self.kin.l[i]: lp[i]})
+            C = msubs(C, {self.kin.q[i]: qp[i], self.kin.l[i]: lp[i], self.kin.q[i].diff(): q_dot[i]})
+            G = msubs(G, {self.kin.q[i]: qp[i], self.kin.l[i]: lp[i], self.g: 9.81})
         return M, C, G
 
     def round2zero(self, m, e):
@@ -198,9 +227,9 @@ if __name__ == '__main__':
 
     kin = kinematics()
     dyn = dynamics()
-    lp, qp, qdp = [1, 1], [0, np.pi/2], [0.1, 0.2]
-    M, C, G = dyn.get_dyn_para(kin.q, kin.qd)  # Symbolic dynamic parameters
-    # M, C, G = kin.dyn_para_numeric(lp, qp, qdp)  # Numeric values dynamic parameters
+    lp, qp, q_dot = [1, 1], [0, np.pi/2], [0.1, 0.2]
+    # M, C, G = dyn.get_dyn_para(kin.q, kin.qd)  # Symbolic dynamic parameters
+    M, C, G = dyn.dyn_para_numeric(lp, qp, q_dot)  # Numeric values dynamic parameters
     print ('hi')
 
 
