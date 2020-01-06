@@ -1,7 +1,7 @@
 # Spacecraft Manipulator Arm Simulation Hybrid Engine 
 ## SM@SHe
 
-SM@SHe is a Python library for modeling, simulation and control of free floating spacecraft manipulator arms intended for the purpose of debris removal, on-orbit servicing, rendezvous & docking etc. 
+SM@SHe is a Python library for the autonomous trajectory learning and control of free-floating space manipulator arms intended for the purpose of debris removal, on-orbit servicing, rendezvous & docking etc. 
 The capabilities of SM@SHe can be summarized as shown in figure.
 <!-- ![Simulation capabilities of SM@SHe](SMASHe_capab.png)
 *Capabilities of SM@SHe* -->
